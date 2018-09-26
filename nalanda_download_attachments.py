@@ -137,7 +137,19 @@ def fetch_attachments(course_id):
                 attachment_urls[folder_name] = []
             attachment_urls[folder_name].extend(get_attachments_from_folder(link))  # extract all links from folder
 
+    attachment_urls.update(fetch_attachments_forums(course_id))   # Also add attachments from forums
     return attachment_urls      # return all urls found along with folders to download to
+
+
+def fetch_attachments_forums(course_id):
+    """Fetch all attachment urls for a given course id from discussion forums."""
+    # To download the attachments from forum
+    r = session.get('http://nalanda.bits-pilani.ac.in/course/view.php', params={"id": course_id})
+    attachment_urls = {}
+    forum_links = {a.get('href') for a in BeautifulSoup(r.text, 'html.parser').find_all('a', {'href', True}) if '/mod/forum/view.php' in a.get('href')}
+    for link in forum_links:  # Get all a tags in page
+        attachment_urls.update(get_attachments_from_forum(link))  # extract all attachments from discussion forum
+    return attachment_urls
 
 
 def get_attachments_from_folder(folder_link):
@@ -146,6 +158,23 @@ def get_attachments_from_folder(folder_link):
     links = [a.get('href') for a in BeautifulSoup(r.text, 'html.parser').find_all('a')]     # Get all links
     attachment_links = [link for link in links if '/mod_folder/content/' in link]       # Filter for attachments
     return attachment_links
+
+
+def get_attachments_from_forum(forum_link):
+    """Gets the attachment urls from given forum url"""
+    r = session.get(forum_link)
+    links = {a.get('href'): a.text for a in BeautifulSoup(r.text, 'html.parser').select('.starter > a')}  # Get all links
+    discussion_links = [link for link in links if '/mod/forum/discuss.php' in link]     # Filter links for discussion
+    # print("Discussion links: ", discussion_links)
+    attachment_urls = {}
+    for discussion_link in discussion_links:
+        r = session.get(discussion_link)
+        # Get all links in the discussion and filter them for attachments
+        new_attachment_links = {a.get('href') for a in BeautifulSoup(r.text, 'html.parser').find_all('a', {'href': True})
+                                if '/mod_forum/attachment/' in a.get('href')}
+        if new_attachment_links:
+            attachment_urls[links[discussion_link]] = new_attachment_links
+    return attachment_urls
 
 
 def download_attachment(attachment_url, filepath):
@@ -165,12 +194,13 @@ def download_attachments(course_title, attachment_urls):
     if attachment_urls:
         os.makedirs(course_title, exist_ok=True)    # Make the folder structure if not exists
         for folder_name in attachment_urls:
-            folder_path = os.path.join(course_title, folder_name)
-            os.makedirs(folder_path, exist_ok=True)
-            for attachment_url in attachment_urls[folder_name]:   # Download attachment to corresponding folder
-                filename = download_attachment(attachment_url, folder_path)
-                if filename:        # Print the location of download
-                    print("Downloaded '%s' To '%s'" % (filename, folder_path))
+            if attachment_urls[folder_name]:    # If any attachment then only create the new folder
+                folder_path = os.path.join(course_title, folder_name)
+                os.makedirs(folder_path, exist_ok=True)
+                for attachment_url in attachment_urls[folder_name]:   # Download attachment to corresponding folder
+                    filename = download_attachment(attachment_url, folder_path)
+                    if filename:        # Print the location of download
+                        print("Downloaded '%s' To '%s'" % (filename, folder_path))
     else:   # if nothing to download
         print("Nothing to Download ..")
 
